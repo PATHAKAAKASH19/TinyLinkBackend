@@ -6,7 +6,7 @@
 
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -14,6 +14,90 @@ datasource db {
 }
 
 
-// model User {
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String    @unique
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   
-// }
+  link Link[]
+  apiKey ApiKey[]
+  refreshToken RefreshToken[]
+}
+
+
+model RefreshToken {
+  id String @id @default(cuid())
+  token String @unique
+  userId  String
+  expiresAt DateTime 
+  createdAt DateTime @default(now())
+  updateAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Link {
+ id String @id @default(cuid())
+ shortcode String @unique
+ url String  @unique
+ customAlias String 
+ userId String
+ isActive Boolean @default(true)
+ password String?
+ expiresAt DateTime?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+
+ user  User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  click click[]
+  @@index([shortcode])
+  @@index([userId])
+  @@index([createdAt])
+} 
+
+model click {
+  id String @id @default(cuid())
+  linkId String
+  browser String? 
+  os String?
+  referrer String?
+  ipAddress String?
+  country String?
+  city String?
+  device String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  
+  link Link @relation(fields: [linkId], references: [id])
+
+  @@index([linkId])
+  @@index([createdAt])
+}
+
+model ApiKey {
+  id String @id @default(cuid())
+  key String @unique
+  userId String
+  name String
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([key])
+}
+
+
+model RateLimit {
+  id String @id @default(cuid())
+  key String
+  count Int @default(1)
+  expiresAt DateTime
+
+  @@index([key])
+}
