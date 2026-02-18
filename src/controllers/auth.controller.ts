@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import jwt from "jsonwebtoken";
 import { registerSchema, loginSchema } from "../schemas/auth.schema";
 import bcrypt from "bcrypt";
-import { success } from "zod";
+import { generateOtp, sendOtpEmail } from "../utils/mailer";
 
 async function signup(req: Request, res: Response) {
   try {
@@ -218,48 +218,11 @@ async function logout(req: Request, res: Response) {
   }
 }
 
-async function generateRefreshToken() {
-  try {
-    
-  } catch (error) {
-    
-  }
-}
-
-async function verifyOtp(req: Request, res: Response) {
-    try {
-      
-        
-       const {} = 
-    } catch (error) {
-      return res.status(500).json({
-        success: true,
-        message:"Internal server error"
-      })
-  }
-}
-
-async function verifyEmail(req: Request, res: Response) {
-  try {
-    
-  } catch (error) {
-    
-  }
-}
-
-
-async function resendVerification(req: Request, res: Response) {}
-
-async function resetPassword(req: Request, res: Response) {
-  try {
-  } catch (error) {}
-}
-
 async function changePassword(req: Request, res: Response) {
   try {
     const { oldPassword, newPassword, userId } = req.body;
 
-    const saltRounds = 10;
+    const salt = await bcrypt.genSalt(10);
 
     const userPresent = await prisma.user.findUnique({
       where: {
@@ -274,23 +237,23 @@ async function changePassword(req: Request, res: Response) {
       });
     }
 
-    const hashedpassword = await bcrypt.hash(oldPassword, saltRounds);
+    const hashedpassword = await bcrypt.hash(oldPassword, salt);
 
     if (hashedpassword !== userPresent.password) {
       return res.status(401).json({
         success: false,
-        message: "Invalid creadentials",
+        message: "Invalid credentials",
       });
     }
 
-    const hashedNewPassoword = await bcrypt.hash(newPassword, saltRounds);
+    const hashedNewPassword = await bcrypt.hash(newPassword, salt);
 
     const updateUserPassword = await prisma.user.update({
       where: {
         id: userId,
       },
       data: {
-        password: hashedNewPassoword,
+        password: hashedNewPassword,
       },
     });
 
@@ -306,13 +269,173 @@ async function changePassword(req: Request, res: Response) {
   }
 }
 
+async function requestPasswordReset(req: Request, res: Response) {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.json(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: {
+        email: email,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "user not found",
+      });
+    }
+
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await prisma.otp.deleteMany({
+      where: {
+        email: email,
+      },
+    });
+
+    await prisma.otp.create({
+      data: {
+        otp: otp,
+        email: email,
+        expiresAt: expiresAt,
+        type: `PASSWORD_RESET`,
+      },
+    });
+
+    await sendOtpEmail(email, otp);
+
+    return res.status(200).json({
+      success: false,
+      message: "OTP send successfully to your email",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: true,
+      message: "Internal server error",
+    });
+  }
+}
+
+async function verifyOtp(req: Request, res: Response) {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and OTP are required",
+      });
+    }
+
+    const otpRecord = await prisma.otp.findFirst({
+      where: {
+        email: email,
+        otp: otp,
+        type: "PASSWORD_RESET",
+        verified: false,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP",
+      });
+    }
+
+    await otpRecord.update({
+      where: {
+        id: otpRecord.id,
+      },
+
+      data: {
+        verified: true,
+      },
+    });
+
+    const resetToken = jwt.sign(
+      {
+        email,
+      },
+      process.env.ACCESS_TOKEN_SECRET!,
+      {
+        expiresIn: "20m",
+        issuer: "urlShortner-backend",
+        audience: "urlShortner-client",
+      },
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "OTP verified successfully",
+      resetToken,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: true,
+      message: "Internal server error",
+    });
+  }
+}
+
+async function resetPassword(req: Request, res: Response) {
+  try {
+    const { newPassword, email } = req.body;
+
+    const salt = await bcrypt.genSalt(10);
+
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    const updateUser = await prisma.user.update({
+      where: {
+        id: email,
+      },
+      data: {
+        password: hashedPassword,
+      },
+    });
+
+    await prisma.oTP.deleteMany({
+      where: { email: email },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changes successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reset Password",
+    });
+  }
+}
+
+async function verifyEmail(req: Request, res: Response) {
+  try {
+    const { email } = req.body;
+  } catch (error) {}
+}
+
 export {
   changePassword,
   signup,
   login,
   logout,
-  forgetPassword,
+  requestPasswordReset,
+  verifyOtp,
   verifyEmail,
-  resendVerification,
   resetPassword,
 };
