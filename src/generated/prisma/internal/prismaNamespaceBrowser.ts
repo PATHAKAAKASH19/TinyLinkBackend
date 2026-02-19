@@ -52,6 +52,8 @@ export const AnyNull = runtime.AnyNull
 
 export const ModelName = {
   User: 'User',
+  Otp: 'Otp',
+  MiliciousSite: 'MiliciousSite',
   RefreshToken: 'RefreshToken',
   Link: 'Link',
   click: 'click',
@@ -80,11 +82,36 @@ export const UserScalarFieldEnum = {
   email: 'email',
   password: 'password',
   name: 'name',
+  googleId: 'googleId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
 
 export type UserScalarFieldEnum = (typeof UserScalarFieldEnum)[keyof typeof UserScalarFieldEnum]
+
+
+export const OtpScalarFieldEnum = {
+  id: 'id',
+  email: 'email',
+  otp: 'otp',
+  type: 'type',
+  expiresAt: 'expiresAt',
+  verified: 'verified',
+  createdAt: 'createdAt'
+} as const
+
+export type OtpScalarFieldEnum = (typeof OtpScalarFieldEnum)[keyof typeof OtpScalarFieldEnum]
+
+
+export const MiliciousSiteScalarFieldEnum = {
+  id: 'id',
+  url: 'url',
+  isSafe: 'isSafe',
+  checkedAt: 'checkedAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type MiliciousSiteScalarFieldEnum = (typeof MiliciousSiteScalarFieldEnum)[keyof typeof MiliciousSiteScalarFieldEnum]
 
 
 export const RefreshTokenScalarFieldEnum = {

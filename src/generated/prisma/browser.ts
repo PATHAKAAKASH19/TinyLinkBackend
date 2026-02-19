@@ -23,6 +23,16 @@ export * from './enums';
  */
 export type User = Prisma.UserModel
 /**
+ * Model Otp
+ * 
+ */
+export type Otp = Prisma.OtpModel
+/**
+ * Model MiliciousSite
+ * 
+ */
+export type MiliciousSite = Prisma.MiliciousSiteModel
+/**
  * Model RefreshToken
  * 
  */

@@ -20,7 +20,7 @@ const generateOtp = (length: number = 6) => {
   return otp;
 };
 
-const sendOtpEmail = async (email: string, otp: number) => {
+const sendOtpEmail = async (email: string, otp: string) => {
   
     const mailOption = {
       from: `<${process.env.COMPANY_EMAIL}>`,

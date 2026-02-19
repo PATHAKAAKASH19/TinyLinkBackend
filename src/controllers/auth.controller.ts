@@ -4,8 +4,8 @@ import jwt from "jsonwebtoken";
 import { registerSchema, loginSchema } from "../schemas/auth.schema";
 import bcrypt from "bcrypt";
 import { generateOtp, sendOtpEmail } from "../utils/mailer";
-import { success } from "zod";
 import { generateCodeVerifier, generateState, Google } from "arctic";
+import { email, success } from "zod";
 
 async function signup(req: Request, res: Response) {
   try {
@@ -357,7 +357,7 @@ async function verifyOtp(req: Request, res: Response) {
       });
     }
 
-    await otpRecord.update({
+    await prisma.otp.update({
       where: {
         id: otpRecord.id,
       },
@@ -409,7 +409,7 @@ async function resetPassword(req: Request, res: Response) {
       },
     });
 
-    await prisma.oTP.deleteMany({
+    await prisma.otp.deleteMany({
       where: { email: email },
     });
 
@@ -468,7 +468,7 @@ async function requestGoogleAuth(req: Request, res: Response) {
   }
 }
 
-async function googleLogin(req: Request, res: Response) {
+async function googleAuthCallback(req: Request, res: Response) {
   const code = req.query.code as string | null;
   const state = req.query.state as string | null;
 
@@ -494,8 +494,19 @@ async function googleLogin(req: Request, res: Response) {
     );
   }
   try {
-    res.clearCookie("oauth_state");
-    res.clearCookie("oauth_code_verifier");
+    res.clearCookie("oauth_state", {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+    res.clearCookie("oauth_code_verifier", {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+
     const googleAuth = new Google(
       process.env.GOOGLE_CLIENT_ID!,
       process.env.GOOGLE_CLIENT_SECRET!,
@@ -507,52 +518,105 @@ async function googleLogin(req: Request, res: Response) {
       storedCodeVerifier,
     );
 
-
-    const accessToken = tokens.accessToken();
+    const googleAccessToken = tokens.accessToken();
 
     const userInfoResponse = await fetch(
       `https://www.googleapis.com/oauth2/v2/userinfo`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+      },
     );
 
     if (!userInfoResponse.ok) {
-       throw new Error('failed to fetch user info from google')
+      throw new Error("failed to fetch user info from google");
     }
 
-    const userInfo = await userInfoResponse.json()
+    const userInfo = await userInfoResponse.json();
 
     const { id: googleId, email, name } = userInfo;
 
     if (!email) {
-      throw new Error("Failed to fetch user email from google")
+      throw new Error("Failed to fetch user email from google");
     }
-
 
     let user = await prisma.user.findUnique({
       where: {
-        email:email
-      }
-    })
+        email: email,
+      },
+    });
 
     if (user) {
-      const updateUser = await prisma.user.update({
-        where: {
-          email:email
-        },
-        data:{
-           googleId:googleId
-        }
-      })
+      if (!user.googleId) {
+        user = await prisma.user.update({
+          where: { email },
+          data: { googleId },
+        });
+      }
     } else {
-      
+      user = await prisma.user.create({
+        data: {
+          email: email,
+          googleId: googleId,
+          name: name,
+        },
+      });
     }
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Google Auth failed",
+
+    const accessToken = jwt.sign(
+      {
+        userId: user.id,
+        email: email,
+        type: "accessToken",
+      },
+      process.env.ACCESS_TOKEN_SECRET!,
+      {
+        expiresIn: "1d",
+        issuer: "urlShortner-backend",
+        audience: "urlShortner-client",
+      },
+    );
+
+    const refreshToken = jwt.sign(
+      {
+        userId: user.id,
+        email: email,
+        type: "refreshToken",
+      },
+      process.env.REFRESH_TOKEN_SECRET!,
+      {
+        expiresIn: "7d",
+        issuer: "urlShortner-backend",
+        audience: "urlShortner-client",
+      },
+    );
+
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
     });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      path: "/api/v1/auth",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    const redirectUrl = new URL(`${process.env.CLIENT_URL}/oauth/callback`);
+    redirectUrl.searchParams.append("accessToken", accessToken);
+    redirectUrl.searchParams.append("userId", user.id);
+    redirectUrl.searchParams.append("email", encodeURIComponent(user.email));
+    if (user.name) {
+      redirectUrl.searchParams.append("name", encodeURIComponent(user.name));
+    }
+
+    return res.redirect(redirectUrl.toString());
+  } catch (error) {
+    return res.redirect(`${process.env.CLIENT_URL}/login?error=auth_failed`);
   }
 }
 
@@ -562,13 +626,74 @@ async function verifyEmail(req: Request, res: Response) {
   } catch (error) {}
 }
 
+async function rotateToken(req: Request, res: Response) {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    const refreshTokenPresent = await prisma.refreshToken.findUnique({
+      where: {
+        token: refreshToken,
+        expiresAt: {
+          gt: new Date()
+        }
+      },
+
+    });
+
+    if (!refreshTokenPresent) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token. Please login",
+      });
+    }
+
+
+    const user = await prisma.user.findUnique({
+      where: {
+       id:refreshTokenPresent.userId
+      }
+    })
+
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message:"user not present. Please signup"
+      })
+    }
+       const accessToken = jwt.sign(
+         {
+           userId: user.id,
+           email: user.email,
+           type: "accessToken",
+         },
+         process.env.ACCESS_TOKEN_SECRET!,
+         {
+           expiresIn: "1d",
+           issuer: "urlShortner-backend",
+           audience: "urlShortner-client",
+         },
+       );
+
+   
+    return res.status(200).json({
+      success: true,
+      message: "token rotate successfully",
+      accessToken:accessToken
+    })
+  } catch (error) {}
+}
+
 export {
   changePassword,
   signup,
   login,
   logout,
-  requestPasswordReset,
   verifyOtp,
   verifyEmail,
   resetPassword,
+  requestPasswordReset,
+  requestGoogleAuth,
+  googleAuthCallback,
+  rotateToken,
 };
