@@ -5,5 +5,12 @@ import { prisma } from "../lib/prisma";
 
 
 async function generateShortUrl() {
-    
+
 }
+
+
+
+
+
+
+export {generateShortUrl}

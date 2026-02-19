@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import { registerSchema, loginSchema } from "../schemas/auth.schema";
 import bcrypt from "bcrypt";
 import { generateOtp, sendOtpEmail } from "../utils/mailer";
+import { success } from "zod";
+import { generateCodeVerifier, generateState, Google } from "arctic";
 
 async function signup(req: Request, res: Response) {
   try {
@@ -419,6 +421,137 @@ async function resetPassword(req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       message: "Failed to reset Password",
+    });
+  }
+}
+
+async function requestGoogleAuth(req: Request, res: Response) {
+  try {
+    const state = generateState();
+    const codeVerifier = generateCodeVerifier();
+
+    const googleAuth = new Google(
+      process.env.GOOGLE_CLIENT_ID!,
+      process.env.GOOGLE_CLIENT_SECRET!,
+      process.env.GOOGLE_REDIRECT_URI!,
+    );
+
+    const SCOPES = ["openid", "email", "profile"];
+
+    const authorizationUrl = googleAuth.createAuthorizationURL(
+      state,
+      codeVerifier,
+      SCOPES,
+    );
+
+    res.cookie("oauth_state", state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 10 * 60 * 1000, // 10 minutes
+    });
+    res.cookie("oauth_code_verifier", codeVerifier, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 10 * 60 * 1000,
+    });
+
+    return res.redirect(authorizationUrl.toString());
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Google Auth failed",
+    });
+  }
+}
+
+async function googleLogin(req: Request, res: Response) {
+  const code = req.query.code as string | null;
+  const state = req.query.state as string | null;
+
+  const storedState = req.cookies?.oauth_state ?? null;
+  const storedCodeVerifier = req.cookies?.oauth_code_verifier ?? null;
+
+  if (
+    !code ||
+    !state ||
+    !storedState ||
+    !storedCodeVerifier ||
+    state !== storedState
+  ) {
+    console.error("OAuth callback validation failed:", {
+      hasCode: !!code,
+      hasState: !!state,
+      hasStoredState: !!storedState,
+      hasCodeVerifier: !!storedCodeVerifier,
+      stateMatch: state === storedState,
+    });
+    return res.redirect(
+      `${process.env.CLIENT_URL}/login?error=invalid_request`,
+    );
+  }
+  try {
+    res.clearCookie("oauth_state");
+    res.clearCookie("oauth_code_verifier");
+    const googleAuth = new Google(
+      process.env.GOOGLE_CLIENT_ID!,
+      process.env.GOOGLE_CLIENT_SECRET!,
+      process.env.GOOGLE_REDIRECT_URI!,
+    );
+
+    const tokens = await googleAuth.validateAuthorizationCode(
+      code,
+      storedCodeVerifier,
+    );
+
+
+    const accessToken = tokens.accessToken();
+
+    const userInfoResponse = await fetch(
+      `https://www.googleapis.com/oauth2/v2/userinfo`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+
+    if (!userInfoResponse.ok) {
+       throw new Error('failed to fetch user info from google')
+    }
+
+    const userInfo = await userInfoResponse.json()
+
+    const { id: googleId, email, name } = userInfo;
+
+    if (!email) {
+      throw new Error("Failed to fetch user email from google")
+    }
+
+
+    let user = await prisma.user.findUnique({
+      where: {
+        email:email
+      }
+    })
+
+    if (user) {
+      const updateUser = await prisma.user.update({
+        where: {
+          email:email
+        },
+        data:{
+           googleId:googleId
+        }
+      })
+    } else {
+      
+    }
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Google Auth failed",
     });
   }
 }

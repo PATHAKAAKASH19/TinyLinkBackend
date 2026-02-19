@@ -3,8 +3,6 @@ import { signup, logout, login, resetPassword, requestPasswordReset, verifyOtp,v
 const router = express.Router();
 
 
-
-
 router.post("/signup", signup)
 router.post("/login", login)
 router.post("/logout", logout)
@@ -14,8 +12,8 @@ router.post("/verify-otp", verifyOtp)
 router.post("/resend-otp",requestPasswordReset)
 router.post("/reset-password", resetPassword)
 router.post("/verify-email", verifyEmail)
-
-
+router.post("/google",)
+router.post("/google/callback" ,)
 
 export default router
 
