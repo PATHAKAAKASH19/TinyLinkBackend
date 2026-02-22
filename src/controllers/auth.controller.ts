@@ -681,7 +681,12 @@ async function rotateToken(req: Request, res: Response) {
       message: "token rotate successfully",
       accessToken:accessToken
     })
-  } catch (error) {}
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message:"Unable to rotate token"
+    })
+  }
 }
 
 export {

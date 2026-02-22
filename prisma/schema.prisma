@@ -59,8 +59,8 @@ model RefreshToken {
 model Link {
  id String @id @default(cuid())
  shortcode String @unique
- url String  @unique
- customAlias String 
+ url String  
+ customAlias String? 
  userId String
  isActive Boolean @default(true)
  password String?
